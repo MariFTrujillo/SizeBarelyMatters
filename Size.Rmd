@@ -1,0 +1,289 @@
+---
+title: "Size, Fees and Investment Performance"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+    number_sections: true
+
+author: "Mariana F Trujillo"
+date: "Today's Date"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(tidyverse)
+library(rio)
+library(ggridges)
+library(ggpattern)
+library(ggdist)
+library(ggbeeswarm)
+library(ggstream)
+library(ggpubr)
+library(scales)
+library(knitr)
+library(reactable)
+library(htmltools)
+library(zoo)
+library(quantmod)
+library(PerformanceAnalytics)
+library(quadprog)
+library(janitor)
+library(kableExtra)
+library(patchwork)
+library(showtext)
+library(openxlsx)
+
+ppd <- read.csv("ppd.csv")
+fees <- read.csv("fees.csv")
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE,
+  fig.align = "center",
+  cache = FALSE
+)
+
+source("APR functions.R")
+source("Pension projection functions.R")
+source("Reason theme.R")
+```
+
+
+```{r}
+
+ppd[] <- lapply(ppd, function(x) ifelse(is.na(x), 0, x))
+fees[] <- lapply(fees, function(x) ifelse(is.na(x), 0, x))
+
+data_2 <- merge(ppd, fees, by = c("ppd_id", "fy"), all.x = TRUE)
+
+```
+
+```{r,include=FALSE}
+Select_PPD <- data_2 %>%
+  select(PlanName.x, fy, StateAbbrev, ActFundedRatio_GASB, InvestmentReturnAssumption_GASB, ActFundedRatio_GASB, AdministeringGovt,
+         ActFundedRatio_GASB, NetPensionLiability, InvestmentConsultantName, MktAssets_net, ActAssets_GASB,
+         InvestmentReturn_1yr, NoFeeData, group_fees, group_id, 
+         est_proportion, EQTotal_Fee, FITotal_Fee, RETotal_Fee, 
+         AltMiscTotal_Fee, PETotal_Fee, HFTotal_Fee, COMDTotal_Fee, expense_AdminExpenses,
+         CashTotal_Fee, OtherTotal_Fee) %>%
+  rename(plan_name = PlanName.x,
+         state = StateAbbrev,       
+         gov_type = AdministeringGovt,
+         aal = ActAssets_GASB,
+         consultant = InvestmentConsultantName,
+         feeprop = est_proportion,
+         mva = MktAssets_net,
+         ava = ActAssets_GASB,
+         arr = InvestmentReturnAssumption_GASB,
+         fund = ActFundedRatio_GASB,
+         return = InvestmentReturn_1yr) %>%
+  mutate(feeprop = ifelse(is.na(feeprop) | feeprop == "", 1, feeprop),
+         EQTotal_Fee = ifelse(is.na(EQTotal_Fee), 0, EQTotal_Fee),
+         FITotal_Fee = ifelse(is.na(FITotal_Fee), 0, FITotal_Fee),
+         RETotal_Fee = ifelse(is.na(RETotal_Fee), 0, RETotal_Fee),
+         AltMiscTotal_Fee = ifelse(is.na(AltMiscTotal_Fee), 0, AltMiscTotal_Fee),
+         PETotal_Fee = ifelse(is.na(PETotal_Fee), 0, PETotal_Fee),
+         HFTotal_Fee = ifelse(is.na(HFTotal_Fee), 0, HFTotal_Fee),
+         COMDTotal_Fee = ifelse(is.na(COMDTotal_Fee), 0, COMDTotal_Fee),
+         CashTotal_Fee = ifelse(is.na(CashTotal_Fee), 0, CashTotal_Fee),
+         OtherTotal_Fee = ifelse(is.na(OtherTotal_Fee), 0, OtherTotal_Fee),
+         total_fees = (EQTotal_Fee + FITotal_Fee + RETotal_Fee + AltMiscTotal_Fee + PETotal_Fee + HFTotal_Fee + COMDTotal_Fee + CashTotal_Fee + OtherTotal_Fee) * feeprop)
+
+write.csv(Select_PPD, "Select_PPD.csv", row.names = FALSE)
+
+
+```
+
+
+```{r,include=FALSE}
+Select_PPD_no0 <- Select_PPD %>%
+  filter(total_fees != 0)
+
+Select_PPD_no0ex <- Select_PPD %>%
+  filter(expense_AdminExpenses != 0) %>%
+  filter(mva != 0)
+
+```
+
+
+#Correlation Size and Returns
+```{r,include=FALSE}
+return_national <- Select_PPD %>%
+  group_by(fy) %>%
+  summarise(national_return = weighted.mean(return, w = mva, na.rm = TRUE),
+            national_ARR = weighted.mean(arr, w = mva, na.rm = TRUE))
+
+```
+
+```{r,include=FALSE}
+Select_PPD_Av <- Select_PPD %>%
+  filter(fy > 2000) %>%
+  filter(mva > 0) %>%
+  group_by(plan_name) %>%
+  mutate(average_return = weighted.mean(return, w = mva, na.rm = TRUE),
+            average_ARR = weighted.mean(arr, w = mva, na.rm = TRUE))
+
+```
+
+
+```{r,echo=FALSE}
+Select_PPD_Av_2 <- Select_PPD_Av %>%
+  arrange(plan_name,fy) %>%  # Ensure the data is in year order
+  mutate(prev_year_assets = lag(mva, 1)) %>%
+ filter(!is.na(prev_year_assets)) 
+ 
+ggplot(Select_PPD_Av_2, aes(x = prev_year_assets, y = return/10)) +
+  geom_point(alpha = 0.2, shape = 21, fill = "blue") +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_x_continuous(trans = "log10",
+                     labels = scales::dollar_format(scale = 1/1000000, suffix = "B", accuracy = 0.1),
+                     breaks = scales::log_breaks(10)) +
+  stat_cor(method = "pearson") +
+   labs(x = "Previous Year's MVA (Billion $)", y = "Investment Rate of Return (%)",
+       title = "Correlation Between Public Pension's Asset Size and Investment Returns",
+       caption = "Figure 1") +
+  theme(plot.caption = element_text(hjust = 0.5, size = 10, face = "italic"),
+        plot.title = element_text(size = 15),
+        plot.caption.position = "plot") +
+  theme_minimal()
+
+
+```
+
+```{r, echo=FALSE}
+Select_PPD_Av_filtered_2 <- Select_PPD_Av_2 %>%
+  filter(!is.na(log(prev_year_assets)), is.finite(log(prev_year_assets)),
+         !is.na(return), is.finite(return))
+
+model_2mva_return <- lm(return ~ log(prev_year_assets), data = Select_PPD_Av_filtered_2)
+summary(model_2mva_return)
+
+```
+
+```{r, echo=FALSE}
+ggplot(Select_PPD_Av, aes(x = mva, y = return/10)) +
+  geom_point(alpha = 0.2, shape = 21, fill = "yellow") +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_x_continuous(trans = "log10",
+                     labels = scales::dollar_format(scale = 1/1000000, suffix = "B", accuracy = 0.1),
+                     breaks = scales::log_breaks(10)) +
+  stat_cor(method = "pearson") +
+  labs(x = "Market Assets (Billion $)", y = "Investment Rate of Return (%)") +
+  ggtitle("Correlation between Same Year Market Assets and Investment Returns") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_minimal()
+
+```
+```{r, echo=FALSE}
+Select_PPD_Av_filtered <- Select_PPD_Av %>%
+  filter(!is.na(log(mva)), is.finite(log(mva)),
+         !is.na(return), is.finite(return))
+
+model_mva_return <- lm(return ~ log(mva), data = Select_PPD_Av_filtered)
+summary(model_mva_return)
+
+```
+
+
+```{r, echo=FALSE}
+
+ggplot(Select_PPD_Av, aes(x = average_return)) +
+  geom_density(fill = "#89CFF0", alpha = 0.5) +
+  labs(x = "Pension 22 Average Returns", y = "Density") +
+  ggtitle("Distribution of Average Returns")+
+  scale_x_continuous(labels = percent_format()) +
+  theme_reason()
+
+
+```
+Funding or asset size?
+```{r,echo=FALSE}
+Select_PPD_Av_filtered <- Select_PPD_Av %>%
+  filter(!is.na(log(fund)), is.finite(log(fund)),
+         !is.na(return), is.finite(return))
+
+model_fund_return <- lm(return ~ log(fund), data = Select_PPD_Av_filtered)
+summary(model_fund_return)
+
+```
+
+
+```{r,include=FALSE}
+
+cor.test(Select_PPD_Av$mva, Select_PPD_Av$return, use = "complete.obs")
+cor.test(Select_PPD_Av$fund, Select_PPD_Av$return, use = "complete.obs")
+cor.test(Select_PPD$expense_AdminExpenses, Select_PPD$return, use = "complete.obs")
+cor.test(Select_PPD$expense_AdminExpenses, Select_PPD$mva, use = "complete.obs")
+```
+```{r,include=FALSE}
+cor.test(Select_PPD$expense_AdminExpenses, Select_PPD$return, use = "complete.obs")
+cor.test(Select_PPD_no0ex$expense_AdminExpenses, Select_PPD_no0ex$return, use = "complete.obs")
+cor.test(Select_PPD$expense_AdminExpenses, Select_PPD$mva, use = "complete.obs")
+cor.test(Select_PPD_no0ex$expense_AdminExpenses, Select_PPD_no0ex$mva, use = "complete.obs")
+
+```
+
+```{r, echo=FALSE}
+
+ggplot(Select_PPD_no0ex, aes(x = expense_AdminExpenses, y = mva)) +
+  geom_point(alpha = 0.2, shape = 21, fill = "orange") +  
+  geom_smooth(method = "lm") +
+  scale_x_continuous(labels = percent_format()) +
+  scale_y_continuous(labels = dollar_format(scale = 1/1000, suffix = "M", accuracy = 0.1)) +
+  stat_cor(method = "pearson") +
+  labs(x = "Total Consulting Fees", y = "Asset Size") +
+  ggtitle("Correlation between Public Pension Funds Funded Ratio and Investment Returns") +
+  theme_reason()
+
+```
+
+```{r, echo=FALSE}
+
+ggplot(Select_PPD_no0ex, aes(x = expense_AdminExpenses)) +
+  geom_density(fill = "orange", alpha = 0.5) +
+  labs(x = "Expenses", y = "Density") +
+  ggtitle("Distribution of Pension Sizes by Expenses")+
+  theme_reason()
+
+
+```
+
+```{r}
+
+num_individual_pensions <- length(unique(ppd$ppd_id))
+print(num_individual_pensions)
+
+
+```
+
+
+
+
+```{r, echo=FALSE}
+Returns_file <- read.xlsx("return_plan_2022.xlsx")
+
+top_10_by_plan_return_2022 <- Returns_file %>%
+  arrange(desc(avg_return)) %>%
+  select(plan_name, mva, avg_return) %>%  # Corrected line: Remove the extra %>% here
+  head(10)
+
+print(top_10_by_plan_return_2022)
+
+
+```
+
+
+```{r, echo=FALSE}
+
+top_10_by_plan_mva_2022 <- Returns_file %>%
+  arrange(desc(mva)) %>%
+  select(plan_name, mva, avg_return) %>%  # Corrected line: Remove the extra %>% here
+  head(10)
+
+print(top_10_by_plan_mva_2022)
+```
+
