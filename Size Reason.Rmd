@@ -1,0 +1,132 @@
+---
+title: "Size, Fees and Investment Performance"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+    number_sections: true
+
+author: "Mariana F Trujillo"
+date: "Today's Date"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(tidyverse)
+library(rio)
+library(ggridges)
+library(ggpattern)
+library(ggdist)
+library(ggbeeswarm)
+library(ggstream)
+library(ggpubr)
+library(scales)
+library(knitr)
+library(reactable)
+library(htmltools)
+library(zoo)
+library(quantmod)
+library(PerformanceAnalytics)
+library(quadprog)
+library(janitor)
+library(kableExtra)
+library(patchwork)
+library(showtext)
+library(openxlsx)
+
+ppd <- read.csv("ppd.csv")
+fees <- read.csv("fees.csv")
+all_plans <- read.csv("all_plans_2023.csv")
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE,
+  fig.align = "center",
+  cache = FALSE
+)
+
+dir.create("outputs")
+
+source("APR functions.R")
+source("Pension projection functions.R")
+source("Reason theme.R")
+```
+
+
+
+
+
+```{r,echo=FALSE}
+all_plans <- all_plans %>%
+  mutate(
+    return = as.numeric(as.character(return)),
+    mva = as.numeric(as.character(mva))
+  )
+
+all_plans <- all_plans %>%
+  filter(!is.na(return) & !is.na(mva))
+
+all_plans <- all_plans %>%
+  arrange(plan_name, fy) %>%
+  mutate(prev_year_assets = lag(mva, 1)) %>%
+  filter(!is.na(prev_year_assets))
+
+output_file <- "outputs/plot.png"
+
+plot <- ggplot(all_plans, aes(x = prev_year_assets, y = return / 10)) +
+  geom_point(alpha = 0.2, shape = 21, fill = "blue") +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_x_continuous(trans = "log10",
+                     labels = scales::dollar_format(scale = 1/1000000000, suffix = "B", accuracy = 0.1),
+                     breaks = scales::log_breaks(10)) +
+  stat_cor(method = "pearson") +
+   labs(x = "Previous Year's MVA (Billion $)", y = "Investment Rate of Return (%)",
+       title = "Correlation Between Public Pension's Investment Returns and Previous Year Asset Size",
+       caption = "Figure 1") +
+  theme(plot.caption = element_text(hjust = 0.5, size = 10, face = "italic"),
+        plot.title = element_text(size = 15),
+        plot.caption.position = "plot") +
+  theme_reason()
+
+ggsave(output_file, plot = plot, width = 10, height = 6)
+
+
+```
+
+
+
+```{r, echo=FALSE}
+all_plans <- all_plans %>%
+  filter(!is.na(log(prev_year_assets)), is.finite(log(prev_year_assets)),
+         !is.na(return), is.finite(return))
+
+model_2mva_return <- lm(return ~ log(prev_year_assets), data = all_plans)
+summary(model_2mva_return)
+
+```
+
+```{r, echo=FALSE}
+ggplot(all_plans, aes(x = mva, y = return/10)) +
+  geom_point(alpha = 0.2, shape = 21, fill = "yellow") +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_x_continuous(trans = "log10",
+                     labels = scales::dollar_format(scale = 1/1000000, suffix = "B", accuracy = 0.1),
+                     breaks = scales::log_breaks(10)) +
+  stat_cor(method = "pearson") +
+  labs(x = "Market Assets (Billion $)", y = "Investment Rate of Return (%)") +
+  ggtitle("Correlation between Same Year Market Assets and Investment Returns") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_minimal()
+
+```
+```{r, echo=FALSE}
+
+model_mva_return <- lm(return ~ log(mva), data = all_plans)
+summary(model_mva_return)
+
+```
+
+

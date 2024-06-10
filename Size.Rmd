@@ -37,6 +37,7 @@ library(openxlsx)
 
 ppd <- read.csv("ppd.csv")
 fees <- read.csv("fees.csv")
+all_plans <- read.csv("all_plans_2023.csv")
 
 knitr::opts_chunk$set(
   echo = TRUE,
@@ -44,6 +45,7 @@ knitr::opts_chunk$set(
   fig.align = "center",
   cache = FALSE
 )
+
 
 source("APR functions.R")
 source("Pension projection functions.R")
@@ -115,6 +117,7 @@ return_national <- Select_PPD %>%
   summarise(national_return = weighted.mean(return, w = mva, na.rm = TRUE),
             national_ARR = weighted.mean(arr, w = mva, na.rm = TRUE))
 
+print(return_national)
 ```
 
 ```{r,include=FALSE}
@@ -134,7 +137,9 @@ Select_PPD_Av_2 <- Select_PPD_Av %>%
   mutate(prev_year_assets = lag(mva, 1)) %>%
  filter(!is.na(prev_year_assets)) 
  
-ggplot(Select_PPD_Av_2, aes(x = prev_year_assets, y = return/10)) +
+output_file <- "outputs/plot2.png"
+
+plot2 <- ggplot(Select_PPD_Av_2, aes(x = prev_year_assets, y = return/10)) +
   geom_point(alpha = 0.2, shape = 21, fill = "blue") +
   geom_smooth(method = "lm") +
   scale_y_continuous(labels = scales::percent_format()) +
@@ -150,8 +155,64 @@ ggplot(Select_PPD_Av_2, aes(x = prev_year_assets, y = return/10)) +
         plot.caption.position = "plot") +
   theme_minimal()
 
+ggsave(output_file, plot2 = plot2, width = 12, height = 6)
+
 
 ```
+
+With reason data
+
+#Correlation Size and Returns
+
+Weighted average 
+
+
+```{r,include=FALSE}
+all_plans_Av <- all_plans %>%
+  filter(fy > 2000) %>%
+  filter(mva > 0) %>%
+  filter(return > 0) %>%
+  group_by(plan_name) %>%
+  mutate(average_return = weighted.mean(return, w = mva, na.rm = TRUE),
+            average_ARR = weighted.mean(arr, w = mva, na.rm = TRUE))
+
+```
+
+
+```{r,echo=FALSE}
+all_plans <- all_plans %>%
+  mutate(
+    return = as.numeric(as.character(return)),
+    mva = as.numeric(as.character(mva))
+  )
+
+all_plans <- all_plans %>%
+  filter(!is.na(return) & !is.na(mva))
+
+all_plans <- all_plans %>%
+  arrange(plan_name, fy) %>%
+  mutate(prev_year_assets = lag(mva, 1)) %>%
+  filter(!is.na(prev_year_assets))
+
+ggplot(all_plans, aes(x = prev_year_assets, y = return / 10)) +
+  geom_point(alpha = 0.2, shape = 21, fill = "blue") +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_x_continuous(trans = "log10",
+                     labels = scales::dollar_format(scale = 1/1000000, suffix = "B", accuracy = 0.1),
+                     breaks = scales::log_breaks(10)) +
+  stat_cor(method = "pearson") +
+   labs(x = "Previous Year's MVA (Billion $)", y = "Investment Rate of Return (%)",
+       title = "Correlation Between Public Pension's Asset Size and Investment Returns",
+       caption = "Figure 1") +
+  theme(plot.caption = element_text(hjust = 0.5, size = 10, face = "italic"),
+        plot.title = element_text(size = 15),
+        plot.caption.position = "plot") +
+  theme_minimal()
+
+```
+
+
 
 ```{r, echo=FALSE}
 Select_PPD_Av_filtered_2 <- Select_PPD_Av_2 %>%
