@@ -34,7 +34,10 @@ library(kableExtra)
 library(patchwork)
 library(showtext)
 library(openxlsx)
+library(plotly)
 
+
+data <- read.csv("combined_data_clean.csv")
 ppd <- read.csv("ppd.csv")
 fees <- read.csv("fees.csv")
 all_plans <- read.csv("all_plans_2023.csv")
@@ -58,30 +61,30 @@ source("Reason theme.R")
 
 
 ```{r,echo=FALSE}
-all_plans <- all_plans %>%
+
+library(ggpubr)
+
+data <- data %>%
   mutate(
     return = as.numeric(as.character(return)),
     mva = as.numeric(as.character(mva))
   )
 
-all_plans <- all_plans %>%
+data <- data %>%
   filter(!is.na(return) & !is.na(mva))
 
-all_plans <- all_plans %>%
-  arrange(plan_name, fy) %>%
+data <- data %>%
+  arrange(plan, fy) %>%
   mutate(prev_year_assets = lag(mva, 1)) %>%
   filter(!is.na(prev_year_assets))
 
-output_file <- "outputs/plot.png"
-
-plot <- ggplot(all_plans, aes(x = prev_year_assets, y = return / 10)) +
+plot <- ggplot(data, aes(x = prev_year_assets, y = return)) +
   geom_point(alpha = 0.2, shape = 21, fill = "blue") +
   geom_smooth(method = "lm") +
-  scale_y_continuous(labels = scales::percent_format()) +
+  scale_y_continuous(labels = scales::percent_format()) +  # Adjust limits based on your data
   scale_x_continuous(trans = "log10",
                      labels = scales::dollar_format(scale = 1/1000000000, suffix = "B", accuracy = 0.1),
                      breaks = scales::log_breaks(10)) +
-  stat_cor(method = "pearson") +
    labs(x = "Previous Year's MVA (Billion $)", y = "Investment Rate of Return (%)",
        title = "Correlation Between Public Pension's Investment Returns and Previous Year Asset Size",
        caption = "Figure 1") +
@@ -90,7 +93,48 @@ plot <- ggplot(all_plans, aes(x = prev_year_assets, y = return / 10)) +
         plot.caption.position = "plot") +
   theme_reason()
 
-ggsave(output_file, plot = plot, width = 10, height = 6)
+plot
+
+
+```
+
+```{r,echo=FALSE}
+
+data2 <- data %>%
+  mutate(
+    return = as.numeric(as.character(return)),
+    mva = as.numeric(as.character(mva))
+  ) %>%
+  filter(!is.na(return) & !is.na(mva)) %>%
+  arrange(plan, fy) %>%
+  mutate(prev_year_assets = lag(mva, 1)) %>%
+  filter(!is.na(prev_year_assets))
+
+plot2 <- ggplot(data2, aes(x = prev_year_assets, y = return, 
+                            text = paste("Plan:", plan, 
+                                         "<br>Previous Year's MVA:", scales::dollar(prev_year_assets, scale = 1/1000000000, suffix = "B"), 
+                                         "<br>Return:", scales::percent(round(return, 2)),  # Rounded to 2 decimals
+                                         "<br>Year:", fy))) +  # Added FYE
+  geom_point(alpha = 0.2, shape = 21, fill = "blue") +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = scales::percent_format()) +  # Adjust limits based on your data
+  scale_x_continuous(trans = "log10",
+                     labels = scales::dollar_format(scale = 1/1000000000, suffix = "B", accuracy = 0.1),
+                     breaks = scales::log_breaks(10)) +
+  stat_cor(method = "pearson") +
+  labs(x = "Previous Year's MVA (Billion $)", y = "Investment Rate of Return (%)",
+       title = "Correlation Between Public Pension's Investment Returns and Previous Year Asset Size",
+       caption = "Figure 1") +
+  theme(plot.caption = element_text(hjust = 0.5, size = 10, face = "italic"),
+        plot.title = element_text(size = 15),
+        plot.caption.position = "plot") +
+  theme_reason()
+
+# Convert ggplot to plotly for interactivity
+interactive_plot <- ggplotly(plot2, tooltip = "text")
+
+# Print the interactive plot
+interactive_plot
 
 
 ```
@@ -98,17 +142,17 @@ ggsave(output_file, plot = plot, width = 10, height = 6)
 
 
 ```{r, echo=FALSE}
-all_plans <- all_plans %>%
+data <- data %>%
   filter(!is.na(log(prev_year_assets)), is.finite(log(prev_year_assets)),
          !is.na(return), is.finite(return))
 
-model_2mva_return <- lm(return ~ log(prev_year_assets), data = all_plans)
+model_2mva_return <- lm(return ~ log(prev_year_assets), data = data)
 summary(model_2mva_return)
 
 ```
 
 ```{r, echo=FALSE}
-ggplot(all_plans, aes(x = mva, y = return/10)) +
+ggplot(data, aes(x = mva, y = return/10)) +
   geom_point(alpha = 0.2, shape = 21, fill = "yellow") +
   geom_smooth(method = "lm") +
   scale_y_continuous(labels = scales::percent_format()) +
@@ -124,7 +168,7 @@ ggplot(all_plans, aes(x = mva, y = return/10)) +
 ```
 ```{r, echo=FALSE}
 
-model_mva_return <- lm(return ~ log(mva), data = all_plans)
+model_mva_return <- lm(return ~ log(mva), data = data)
 summary(model_mva_return)
 
 ```
