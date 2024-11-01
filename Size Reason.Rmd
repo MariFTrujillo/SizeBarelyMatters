@@ -35,6 +35,7 @@ library(patchwork)
 library(showtext)
 library(openxlsx)
 library(plotly)
+library(ggpubr)
 
 
 data <- read.csv("combined_data_clean.csv")
@@ -58,42 +59,55 @@ source("Reason theme.R")
 
 
 
-
-
 ```{r,echo=FALSE}
-
-library(ggpubr)
 
 data <- data %>%
   mutate(
     return = as.numeric(as.character(return)),
     mva = as.numeric(as.character(mva))
-  )
-
-data <- data %>%
-  filter(!is.na(return) & !is.na(mva))
-
-data <- data %>%
+  ) %>%
+  filter(!is.na(return) & !is.na(mva)) %>%
   arrange(plan, fy) %>%
   mutate(prev_year_assets = lag(mva, 1)) %>%
   filter(!is.na(prev_year_assets))
 
+# Calculate correlation and p-value
+correlation_test <- cor.test(data$prev_year_assets, data$return)
+correlation_coefficient <- round(correlation_test$estimate, 3)
+p_value <- round(correlation_test$p.value, 3)
+
+# Plot with correlation and p-value annotation
 plot <- ggplot(data, aes(x = prev_year_assets, y = return)) +
   geom_point(alpha = 0.2, shape = 21, fill = "blue") +
-  geom_smooth(method = "lm") +
-  scale_y_continuous(labels = scales::percent_format()) +  # Adjust limits based on your data
-  scale_x_continuous(trans = "log10",
-                     labels = scales::dollar_format(scale = 1/1000000000, suffix = "B", accuracy = 0.1),
-                     breaks = scales::log_breaks(10)) +
-   labs(x = "Previous Year's MVA (Billion $)", y = "Investment Rate of Return (%)",
-       title = "Correlation Between Public Pension's Investment Returns and Previous Year Asset Size",
-       caption = "Figure 1") +
+  geom_smooth(method = "lm", color = "red") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_x_continuous(
+    trans = "log10",
+    labels = scales::dollar_format(scale = 1/1000000000, suffix = "B", accuracy = 0.1),
+    breaks = scales::log_breaks(10)
+  ) +
+  labs(
+    x = "Previous Year's MVA (Billion $)",
+    y = "Investment Rate of Return (%)",
+    title = "Correlation Between Public Pension's Investment Returns and Previous Year Asset Size",
+    caption = "Figure 1"
+  ) +
   theme(plot.caption = element_text(hjust = 0.5, size = 10, face = "italic"),
         plot.title = element_text(size = 15),
         plot.caption.position = "plot") +
-  theme_reason()
+  theme_reason() +
+  annotate(
+    "text",
+    x = min(data$prev_year_assets, na.rm = TRUE),
+    y = max(data$return, na.rm = TRUE),
+    label = paste("Correlation Coefficient:", correlation_coefficient, "\n", "p-value:", p_value),
+    hjust = 0,
+    vjust = 1,
+    size = 4,
+    color = "black"
+  )
 
-plot
+print(plot)
 
 
 ```
@@ -139,7 +153,47 @@ interactive_plot
 
 ```
 
+# Top Plans by Size & Performance
+```{r, echo=FALSE}
 
+geometric_mean <- function(x) {
+  exp(mean(log(1 + x))) - 1
+}
+
+data_geo <- data %>%
+  filter(fy >= 2001 & fy <= 2023) %>%
+  group_by(plan) %>%
+  summarise(
+    geo_return_23yr = geometric_mean(return),  # 23-year geometric average of returns
+    mva_2023 = mva[fy == 2023]  # MVA specifically for the year 2023
+  ) %>%
+  filter(!is.na(geo_return_23yr), !is.na(mva_2023))
+
+# Top 10 plans by 23-year geometric average of investment returns
+top_geo_returns <- data_geo %>%
+  arrange(desc(geo_return_23yr)) %>%
+  head(10)
+
+# Top 10 plans by 2023 Market Value of Assets
+top_mva <- data_geo %>%
+  arrange(desc(mva_2023)) %>%
+  head(10)
+
+# Display tables
+kable(top_geo_returns, caption = "Top 10 Plans by 23-Year Geometric Average of Investment Returns", format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+kable(top_mva, caption = "Top 10 Plans by 2023 Market Value of Assets", format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Save tables to Excel files
+write.xlsx(top_geo_returns, "top_plans_geometric_returns.xlsx")
+write.xlsx(top_mva, "top_plans_market_value_assets.xlsx")
+
+```
+
+
+# Statistical test 
 
 ```{r, echo=FALSE}
 data <- data %>%
@@ -168,7 +222,7 @@ ggplot(data, aes(x = mva, y = return/10)) +
 ```
 ```{r, echo=FALSE}
 
-model_mva_return <- lm(return ~ log(mva), data = data)
+model_mva_return <- lm(return ~ log(prev_year_assets), data = data)
 summary(model_mva_return)
 
 ```
